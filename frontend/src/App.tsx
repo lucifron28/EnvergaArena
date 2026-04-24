@@ -9,6 +9,7 @@ import MainLayout from './components/layout/MainLayout';
 import Home from './pages/Public/Home';
 import Schedules from './pages/Public/Schedules';
 import Results from './pages/Public/Results';
+import Rooney from './pages/Public/Rooney';
 
 // Auth & Admin
 import Login from './pages/Auth/Login';
@@ -29,6 +30,7 @@ export default function App() {
                             <Route path="/" element={<Home />} />
                             <Route path="/schedules" element={<Schedules />} />
                             <Route path="/results" element={<Results />} />
+                            <Route path="/rooney" element={<Rooney />} />
                             <Route path="/login" element={<Login />} />
 
                             {/* Protected Admin Shell */}

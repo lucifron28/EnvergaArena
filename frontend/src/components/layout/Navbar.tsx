@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Trophy, Calendar, Users, Home, LogIn, LayoutDashboard, LogOut } from 'lucide-react';
+import { Trophy, Calendar, Users, Home, LogIn, LayoutDashboard, LogOut, Bot } from 'lucide-react';
 
 export default function Navbar() {
     const { isAuthenticated, user, logoutState } = useAuth();
@@ -28,6 +28,7 @@ export default function Navbar() {
                     <li><NavLink to="/" className={({isActive}) => isActive ? "text-gold bg-white/10" : "hover:text-gold"}><Home className="w-4 h-4 mr-1"/> Home</NavLink></li>
                     <li><NavLink to="/schedules" className={({isActive}) => isActive ? "text-gold bg-white/10" : "hover:text-gold"}><Calendar className="w-4 h-4 mr-1"/> Schedules</NavLink></li>
                     <li><NavLink to="/results" className={({isActive}) => isActive ? "text-gold bg-white/10" : "hover:text-gold"}><Trophy className="w-4 h-4 mr-1"/> Results</NavLink></li>
+                    <li><NavLink to="/rooney" className={({isActive}) => isActive ? "text-gold bg-white/10" : "hover:text-gold"}><Bot className="w-4 h-4 mr-1"/> Rooney AI</NavLink></li>
                 </ul>
             </div>
             

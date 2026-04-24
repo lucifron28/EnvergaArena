@@ -31,9 +31,12 @@ router.register(r'medal-tally', MedalTallyViewSet)
 from rest_framework_simplejwt.views import TokenRefreshView
 from core.serializers import CustomTokenObtainPairView
 
+from rooney.views import RooneyQueryView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/public/rooney/query/', RooneyQueryView.as_view(), name='rooney_query'),
     path('api/public/', include(router.urls)),
 ]
