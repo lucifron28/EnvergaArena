@@ -18,12 +18,12 @@ from rest_framework.response import Response
 from django.db import transaction
 
 from .models import (
-    EventSchedule, EventParticipant,
+    EventSchedule, Athlete, EventRegistration, RosterEntry,
     MatchResult, MatchSetScore,
     PodiumResult, MedalRecord, MedalTally,
 )
 from .serializers import (
-    EventScheduleSerializer, EventParticipantSerializer,
+    EventScheduleSerializer, AthleteSerializer, EventRegistrationSerializer,
     MatchResultSerializer, MatchResultWriteSerializer, MatchSetScoreSerializer,
     PodiumResultSerializer,
     MedalRecordSerializer, MedalTallySerializer,
@@ -46,7 +46,7 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 class EventScheduleViewSet(viewsets.ModelViewSet):
     queryset = EventSchedule.objects.select_related(
         'event', 'venue', 'venue_area'
-    ).prefetch_related('participants__department').all()
+    ).prefetch_related('registrations__department', 'registrations__roster__athlete').all()
     serializer_class = EventScheduleSerializer
     permission_classes = [IsAdminOrReadOnly]
 
@@ -56,6 +56,40 @@ class EventScheduleViewSet(viewsets.ModelViewSet):
         if event_id:
             qs = qs.filter(event_id=event_id)
         return qs
+
+# ---------------------------------------------------------------------------
+# Registration Workflow
+# ---------------------------------------------------------------------------
+
+class AthleteViewSet(viewsets.ModelViewSet):
+    serializer_class = AthleteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return Athlete.objects.all()
+        # Dept reps only see their own athletes
+        if hasattr(user, 'profile') and user.profile.department:
+            return Athlete.objects.filter(department=user.profile.department)
+        return Athlete.objects.none()
+
+class EventRegistrationViewSet(viewsets.ModelViewSet):
+    serializer_class = EventRegistrationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = EventRegistration.objects.select_related('schedule__event', 'department').prefetch_related('roster__athlete')
+        if user.is_staff or user.is_superuser:
+            return qs.all()
+        if hasattr(user, 'profile') and user.profile.department:
+            return qs.filter(department=user.profile.department)
+        return qs.none()
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        serializer.save(submitted_by=self.request.user)
 
 
 # ---------------------------------------------------------------------------
