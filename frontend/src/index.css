@@ -1,19 +1,10 @@
-@import "tailwindcss";
-@plugin "daisyui";
-
-@theme {
-  --color-maroon: #800000;
-  --color-maroon-dark: #600000;
-  --color-gold: #FFD700;
-  --color-ivory: #FFFFF0;
-  --color-warm-gray: #d7d7d7;
-  --color-charcoal: #36454F;
-  --color-navy: #000080;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 body {
   margin: 0;
   padding: 0;
-  background-color: var(--color-ivory);
+  background-color: theme('colors.ivory');
   font-family: system-ui, -apple-system, sans-serif;
 }
