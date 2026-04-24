@@ -1,7 +1,24 @@
+from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
-from .models import UserProfile
+from .models import Department, Venue, VenueArea, UserProfile
 
+class DepartmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Department
+        fields = '__all__'
+
+class VenueAreaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VenueArea
+        fields = '__all__'
+
+class VenueSerializer(serializers.ModelSerializer):
+    areas = VenueAreaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Venue
+        fields = ['id', 'name', 'location', 'areas', 'created_at', 'updated_at']
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
