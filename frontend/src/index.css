@@ -1,10 +1,24 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "daisyui/index.js";
 
-body {
-  margin: 0;
-  padding: 0;
-  background-color: theme('colors.ivory');
-  font-family: system-ui, -apple-system, sans-serif;
+@theme {
+  --color-maroon: #800000;
+  --color-maroon-dark: #600000;
+  --color-gold: #FFD700;
+  --color-ivory: #FFFFF0;
+  --color-warm-gray: #d7d7d7;
+  --color-charcoal: #36454F;
+  --color-navy: #000080;
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-ivory);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
