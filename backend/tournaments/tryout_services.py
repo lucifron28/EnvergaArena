@@ -1,5 +1,7 @@
 import json
+import logging
 import secrets
+import ipaddress
 from datetime import timedelta
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
@@ -15,6 +17,7 @@ from .models import EmailVerificationCode
 
 TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
 BREVO_EMAIL_URL = 'https://api.brevo.com/v3/smtp/email'
+logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request):
@@ -47,6 +50,25 @@ def enforce_rate_limit(scope, identifier, limit, window_seconds=3600):
         cache.incr(key)
 
 
+def _public_remote_ip(remote_ip):
+    if not remote_ip:
+        return None
+    try:
+        parsed = ipaddress.ip_address(remote_ip)
+    except ValueError:
+        return None
+    if not parsed.is_global:
+        return None
+    return str(parsed)
+
+
+def _turnstile_unavailable_error(detail):
+    message = 'Unable to verify Turnstile right now. Please try again.'
+    if settings.DEBUG and detail:
+        message = f'{message} Debug: {detail}'
+    return ValidationError(message)
+
+
 def verify_turnstile_token(token, remote_ip=None):
     if not token:
         raise ValidationError('Complete the Turnstile challenge before requesting an OTP.')
@@ -57,8 +79,9 @@ def verify_turnstile_token(token, remote_ip=None):
         'secret': settings.TURNSTILE_SECRET_KEY,
         'response': token,
     }
-    if remote_ip:
-        payload['remoteip'] = remote_ip
+    public_remote_ip = _public_remote_ip(remote_ip)
+    if public_remote_ip:
+        payload['remoteip'] = public_remote_ip
 
     encoded = parse.urlencode(payload).encode()
     req = request.Request(
@@ -71,8 +94,19 @@ def verify_turnstile_token(token, remote_ip=None):
     try:
         with request.urlopen(req, timeout=8) as response:
             result = json.loads(response.read().decode('utf-8'))
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise ValidationError('Unable to verify Turnstile right now. Please try again.') from exc
+    except HTTPError as exc:
+        body = exc.read().decode('utf-8', errors='replace')[:500]
+        logger.warning('Turnstile Siteverify HTTP error %s: %s', exc.code, body)
+        raise _turnstile_unavailable_error(f'Cloudflare Siteverify returned HTTP {exc.code}.') from exc
+    except URLError as exc:
+        logger.warning('Turnstile Siteverify connection error: %s', exc.reason)
+        raise _turnstile_unavailable_error(f'Could not connect to Cloudflare Siteverify: {exc.reason}.') from exc
+    except TimeoutError as exc:
+        logger.warning('Turnstile Siteverify timed out.')
+        raise _turnstile_unavailable_error('Cloudflare Siteverify timed out.') from exc
+    except json.JSONDecodeError as exc:
+        logger.warning('Turnstile Siteverify returned invalid JSON.')
+        raise _turnstile_unavailable_error('Cloudflare Siteverify returned an invalid response.') from exc
 
     if not result.get('success'):
         error_codes = ', '.join(result.get('error-codes', []))

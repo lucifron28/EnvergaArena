@@ -358,6 +358,11 @@ Detailed docs live in [architecture/](./architecture/):
 - security/testing/risks
 - decisions and roadmap
 
+Additional technical docs:
+
+- [Authentication docs](./docs/auth/)
+- [API testing guide](./docs/api-testing/)
+
 ## Important Demo Notes
 
 - Rotate any real secrets that were ever committed or shared before a real demo.

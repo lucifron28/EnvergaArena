@@ -37,12 +37,46 @@ DEPARTMENT_ACRONYMS = [
     "CNAHS",
 ]
 DEMO_USERNAMES = ["admin", *[f"{acronym.lower()}_rep" for acronym in DEPARTMENT_ACRONYMS]]
+SEEDED_NEWS_SLUGS = [
+    "verified-tryout-applications-open-for-department-teams",
+    "department-representatives-reminded-to-review-pending-registrations",
+    "womens-volleyball-finals-moved-to-indoor-court-b",
+    "badminton-team-qualifiers-confirmed-covered-sports-complex",
+    "dancesport-latin-category-strong-college-support",
+    "esports-semifinal-roster-checks-completed",
+    "mens-table-tennis-team-final-result-added",
+    "200m-freestyle-final-podium-reflected-in-medal-tally",
+    "mens-basketball-finals-live-pending-final-confirmation",
+    "schedules-results-medal-standings-available-public-viewing",
+    "womens-volleyball-finals-recap",
+    # Old seed slugs removed by the news-only refresh path.
+    "intramurals-week-operations-desk-reminders",
+    "badminton-tennis-qualifiers-schedule-release",
+]
+SEEDED_AI_RECAP_SCOPE_KEYS = [
+    "seed-match-volleyball",
+    "seed-match-table-tennis",
+    "seed-podium-swimming",
+    "seed-leaderboard-summary",
+]
 
 
 class Command(BaseCommand):
     help = "Seeds the database with context-aligned Enverga Arena demo data"
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--news-only",
+            action="store_true",
+            help="Refresh only seeded news articles and AI recap drafts without rebuilding the full demo database.",
+        )
+
     def handle(self, *args, **kwargs):
+        if kwargs.get("news_only"):
+            self.seed_news_only()
+            self.stdout.write(self.style.SUCCESS("Successfully refreshed seeded news and AI recap demo content."))
+            return
+
         self.stdout.write("Clearing existing data...")
         User.objects.filter(username__in=DEMO_USERNAMES).delete()
         AIRecap.objects.all().delete()
@@ -81,6 +115,43 @@ class Command(BaseCommand):
         rep_logins = ", ".join(f"{acronym.lower()}_rep/{DEMO_PASSWORD}" for acronym in DEPARTMENT_ACRONYMS)
         self.stdout.write(self.style.SUCCESS(f"Demo admin login: admin/{DEMO_PASSWORD}"))
         self.stdout.write(self.style.SUCCESS(f"Demo department rep logins: {rep_logins}"))
+
+    def seed_news_only(self):
+        admin_user = User.objects.filter(username="admin").first() or User.objects.filter(is_superuser=True).first()
+        if not admin_user:
+            raise RuntimeError("No admin user found. Run `python manage.py seed_data` first.")
+
+        departments = {
+            department.acronym: department
+            for department in Department.objects.filter(acronym__in=DEPARTMENT_ACRONYMS)
+        }
+        missing_departments = [acronym for acronym in DEPARTMENT_ACRONYMS if acronym not in departments]
+        if missing_departments:
+            raise RuntimeError(f"Missing departments for news seed: {', '.join(missing_departments)}")
+
+        event_names = {
+            "basketball": "Men's Basketball Finals",
+            "volleyball": "Women's Volleyball Finals",
+            "badminton": "Badminton Team Qualifiers",
+            "table_tennis": "Men's Table Tennis Team Final",
+            "swimming": "200m Freestyle Final",
+            "dancesport": "Dancesport Latin Category",
+            "esports": "Esports Semifinal Title A",
+        }
+        schedules = {}
+        missing_events = []
+        for key, event_name in event_names.items():
+            schedule = EventSchedule.objects.select_related("event").filter(event__name=event_name).order_by("id").first()
+            if not schedule:
+                missing_events.append(event_name)
+            else:
+                schedules[key] = schedule
+        if missing_events:
+            raise RuntimeError(f"Missing schedules for news seed: {', '.join(missing_events)}")
+
+        AIRecap.objects.filter(scope_key__in=SEEDED_AI_RECAP_SCOPE_KEYS).delete()
+        NewsArticle.objects.filter(slug__in=SEEDED_NEWS_SLUGS).delete()
+        self.seed_news_and_ai_recaps(schedules, departments, {"admin": admin_user})
 
     def seed_departments(self):
         self.stdout.write("Seeding official departments...")
@@ -572,50 +643,210 @@ class Command(BaseCommand):
         admin_user = users["admin"]
         now = timezone.now()
 
-        announcement = NewsArticle.objects.create(
-            title="Intramurals week operations desk reminders",
-            slug="intramurals-week-operations-desk-reminders",
-            summary="Administrators remind departments to review schedules, venue assignments, and returned registrations before the next competition block.",
-            body_md="The operations desk reminds all departments to monitor official schedules, complete registration revisions promptly, and coordinate venue readiness before each event block.",
-            article_type="announcement",
-            source_label="OSCR Sports Desk",
-            status="published",
-            published_at=now - timedelta(hours=6),
+        def create_article(
+            key,
+            title,
+            slug,
+            summary,
+            body_md,
+            article_type,
+            source_label,
+            days_ago,
+            hours_ago=0,
+            event_key=None,
+            department_key=None,
             ai_generated=False,
-            created_by=admin_user,
-            reviewed_by=admin_user,
-        )
+        ):
+            return NewsArticle.objects.create(
+                title=title,
+                slug=slug,
+                summary=summary,
+                body_md=body_md,
+                article_type=article_type,
+                source_label=source_label,
+                event=schedules[event_key].event if event_key else None,
+                department=departments[department_key] if department_key else None,
+                status="published",
+                published_at=now - timedelta(days=days_ago, hours=hours_ago),
+                ai_generated=ai_generated,
+                created_by=admin_user,
+                reviewed_by=admin_user,
+            )
 
-        schedule_update = NewsArticle.objects.create(
-            title="Badminton and tennis qualifiers confirmed in the latest schedule release",
-            slug="badminton-tennis-qualifiers-schedule-release",
-            summary="The latest official release confirms the next badminton and tennis qualification blocks together with venue references.",
-            body_md="The official Enverga Arena schedule confirms the next qualification blocks for badminton and tennis, including venue assignments and start windows shown in the live schedule module.",
-            article_type="schedule_update",
-            source_label="Schedule Operations",
-            event=schedules["badminton"].event,
-            status="published",
-            published_at=now - timedelta(hours=4),
-            ai_generated=False,
-            created_by=admin_user,
-            reviewed_by=admin_user,
-        )
-
-        recap_news = NewsArticle.objects.create(
-            title="Women's Volleyball Finals recap published after official final result",
-            slug="womens-volleyball-finals-recap",
-            summary="The final volleyball result is now reflected in the official standings and public recap flow.",
-            body_md="The Women's Volleyball Finals concluded with an official final score and corresponding medal update. The public recap summarizes the final result and its effect on the current standings.",
-            article_type="result_recap",
-            source_label="AI Recap Review Desk",
-            event=schedules["volleyball"].event,
-            department=departments["CAFA"],
-            status="published",
-            published_at=now - timedelta(hours=2),
-            ai_generated=True,
-            created_by=admin_user,
-            reviewed_by=admin_user,
-        )
+        articles = {
+            "tryouts_open": create_article(
+                key="tryouts_open",
+                title="Verified tryout applications open for department teams",
+                slug="verified-tryout-applications-open-for-department-teams",
+                summary="Students may now submit verified tryout applications for eligible intramurals events through the public Enverga Arena form.",
+                body_md=(
+                    "The Sports Coordinator's Office has opened the verified tryout application period for department teams participating in MSEUF Intramurals. "
+                    "Students must use their official student email address and complete OTP verification before submitting an application. "
+                    "Department Representatives will review verified applications and coordinate selections for official rosters."
+                ),
+                article_type="announcement",
+                source_label="MSEUF Sports Coordinator",
+                days_ago=7,
+            ),
+            "rep_reminder": create_article(
+                key="rep_reminder",
+                title="Department representatives reminded to review pending registrations",
+                slug="department-representatives-reminded-to-review-pending-registrations",
+                summary="Department representatives are reminded to check returned rosters and registration statuses before the next review block.",
+                body_md=(
+                    "All Department Representatives are requested to review pending tryout selections, participant records, and event registrations in the department portal. "
+                    "Registrations marked for revision should be updated as soon as possible so the Sports Coordinator can complete eligibility and roster checks before scheduled matches."
+                ),
+                article_type="announcement",
+                source_label="Tournament Secretariat",
+                days_ago=6,
+                hours_ago=2,
+            ),
+            "volleyball_schedule": create_article(
+                key="volleyball_schedule",
+                title="Women's Volleyball Finals moved to Indoor Court B",
+                slug="womens-volleyball-finals-moved-to-indoor-court-b",
+                summary="The Women's Volleyball Finals venue assignment has been updated in the official schedule.",
+                body_md=(
+                    "The Women's Volleyball Finals will now be played at Indoor Court B to accommodate venue preparation and officiating requirements. "
+                    "Teams, officials, and department representatives are advised to follow the latest schedule posted in Enverga Arena before proceeding to the venue."
+                ),
+                article_type="schedule_update",
+                source_label="Schedule Operations",
+                days_ago=5,
+                event_key="volleyball",
+            ),
+            "badminton_schedule": create_article(
+                key="badminton_schedule",
+                title="Badminton Team Qualifiers confirmed at the Covered Sports Complex",
+                slug="badminton-team-qualifiers-confirmed-covered-sports-complex",
+                summary="The Badminton Team Qualifiers will proceed at the assigned covered court according to the current schedule.",
+                body_md=(
+                    "The latest schedule confirms the Badminton Team Qualifiers at the Covered Sports Complex. "
+                    "Participating departments should review their roster status and report to the venue within the posted call time. "
+                    "Any roster questions should be coordinated through the assigned Department Representative."
+                ),
+                article_type="schedule_update",
+                source_label="Venue Operations Team",
+                days_ago=4,
+                hours_ago=5,
+                event_key="badminton",
+            ),
+            "dancesport_highlight": create_article(
+                key="dancesport_highlight",
+                title="Dancesport Latin Category brings strong support from participating colleges",
+                slug="dancesport-latin-category-strong-college-support",
+                summary="The Dancesport Latin Category highlighted preparation, coordination, and department support during the cultural events block.",
+                body_md=(
+                    "The Dancesport Latin Category featured participants and supporters from several MSEUF departments, including the College of Architecture and Fine Arts (CAFA) "
+                    "and the College of International Hospitality and Tourism Management (CIHTM). The event reflected steady preparation from performers and orderly coordination from the cultural events committee."
+                ),
+                article_type="highlight",
+                source_label="Cultural Events Committee",
+                days_ago=4,
+                event_key="dancesport",
+                department_key="CIHTM",
+            ),
+            "esports_highlight": create_article(
+                key="esports_highlight",
+                title="Esports Semifinal roster checks completed for participating departments",
+                slug="esports-semifinal-roster-checks-completed",
+                summary="Roster verification for the Esports Semifinal has been completed ahead of the scheduled match block.",
+                body_md=(
+                    "Roster checks for the Esports Semifinal have been completed for the participating departments. "
+                    "The College of Computing and Multimedia Studies (CCMS), College of Business and Accountancy (CBA), and College of Engineering (CENG) representatives are advised to monitor schedule updates and final call times in Enverga Arena."
+                ),
+                article_type="highlight",
+                source_label="Esports Committee",
+                days_ago=3,
+                hours_ago=4,
+                event_key="esports",
+                department_key="CCMS",
+            ),
+            "table_tennis_recap": create_article(
+                key="table_tennis_recap",
+                title="Men's Table Tennis Team Final result added to official records",
+                slug="mens-table-tennis-team-final-result-added",
+                summary="The finalized table tennis result has been recorded and reflected in the official results workflow.",
+                body_md=(
+                    "The Men's Table Tennis Team Final has been finalized by the event officials. "
+                    "The result is now recorded in Enverga Arena and may be viewed through the public results page. "
+                    "Any related medal impact follows the official medal-priority ranking rule used by the system."
+                ),
+                article_type="result_recap",
+                source_label="AI Recap, reviewed by Sports Coordinator",
+                days_ago=2,
+                hours_ago=6,
+                event_key="table_tennis",
+                department_key="CCMS",
+                ai_generated=True,
+            ),
+            "swimming_recap": create_article(
+                key="swimming_recap",
+                title="200m Freestyle Final podium reflected in medal tally",
+                slug="200m-freestyle-final-podium-reflected-in-medal-tally",
+                summary="The finalized 200m Freestyle Final placements have been added to the official medal tally.",
+                body_md=(
+                    "The 200m Freestyle Final has been finalized and the podium results are now reflected in the official medal tally. "
+                    "The standings continue to follow the medal-priority rule: gold first, then silver, then bronze, with department name used only as a stable final sort."
+                ),
+                article_type="result_recap",
+                source_label="AI Recap, reviewed by Sports Coordinator",
+                days_ago=2,
+                hours_ago=2,
+                event_key="swimming",
+                department_key="CAFA",
+                ai_generated=True,
+            ),
+            "basketball_update": create_article(
+                key="basketball_update",
+                title="Men's Basketball Finals remains live pending final confirmation",
+                slug="mens-basketball-finals-live-pending-final-confirmation",
+                summary="The Men's Basketball Finals is being monitored through the results workflow and will update once finalized.",
+                body_md=(
+                    "The Men's Basketball Finals remains in active monitoring through the Enverga Arena results workflow. "
+                    "Only finalized results will affect official medal records and leaderboard standings. "
+                    "Departments should refer to the public results page for confirmed updates."
+                ),
+                article_type="general_news",
+                source_label="Results Desk",
+                days_ago=1,
+                hours_ago=7,
+                event_key="basketball",
+                department_key="CAS",
+            ),
+            "public_info": create_article(
+                key="public_info",
+                title="Schedules, results, and medal standings available for public viewing",
+                slug="schedules-results-medal-standings-available-public-viewing",
+                summary="Students, faculty, and guests may view official intramurals updates through the public Enverga Arena pages.",
+                body_md=(
+                    "The public Enverga Arena pages provide access to official schedules, results, medal tally, leaderboard, published news, and Rooney AI. "
+                    "Draft articles, internal recap drafts, registration review notes, and department-private workflow records remain protected."
+                ),
+                article_type="general_news",
+                source_label="Enverga Arena Secretariat",
+                days_ago=1,
+                hours_ago=1,
+            ),
+            "volleyball_recap": create_article(
+                key="volleyball_recap",
+                title="Women's Volleyball Finals recap published after official final result",
+                slug="womens-volleyball-finals-recap",
+                summary="The final volleyball result is now reflected in the official standings and public recap flow.",
+                body_md=(
+                    "The Women's Volleyball Finals concluded with an official final score and corresponding medal update. "
+                    "The public recap summarizes the finalized result, source event, and effect on the current standings after Sports Coordinator review."
+                ),
+                article_type="result_recap",
+                source_label="AI Recap, reviewed by Sports Coordinator",
+                days_ago=0,
+                hours_ago=6,
+                event_key="volleyball",
+                department_key="CAFA",
+                ai_generated=True,
+            ),
+        }
 
         AIRecap.objects.create(
             trigger_type="event_completion",
@@ -638,7 +869,31 @@ class Command(BaseCommand):
             generated_at=now - timedelta(hours=2, minutes=10),
             reviewed_at=now - timedelta(hours=2, minutes=2),
             reviewed_by=admin_user,
-            linked_news_article=recap_news,
+            linked_news_article=articles["volleyball_recap"],
+        )
+
+        AIRecap.objects.create(
+            trigger_type="event_completion",
+            scope_type="match_result",
+            scope_key="seed-match-table-tennis",
+            event=schedules["table_tennis"].event,
+            department=departments["CCMS"],
+            input_snapshot_json={
+                "event_title": schedules["table_tennis"].event.name,
+                "scoreline": "CCMS 3 - 1 CAS",
+                "winner": departments["CCMS"].name,
+            },
+            generated_title="Men's Table Tennis Team Final recap approved",
+            generated_summary="A grounded table tennis recap was reviewed and published as official news.",
+            generated_body="The Men's Table Tennis Team Final was finalized in the system and published after admin review.",
+            model_name="template-grounded-v1",
+            prompt_version="recap_v1",
+            citation_map_json={"sources": ["final_match_result", "official_results"]},
+            status="published",
+            generated_at=now - timedelta(days=2, hours=6, minutes=20),
+            reviewed_at=now - timedelta(days=2, hours=6, minutes=5),
+            reviewed_by=admin_user,
+            linked_news_article=articles["table_tennis_recap"],
         )
 
         AIRecap.objects.create(
@@ -661,8 +916,11 @@ class Command(BaseCommand):
             model_name="template-grounded-v1",
             prompt_version="recap_v1",
             citation_map_json={"sources": ["final_podium_results", "official_medal_tally"]},
-            status="generated",
-            generated_at=now - timedelta(minutes=75),
+            status="published",
+            generated_at=now - timedelta(days=2, hours=2, minutes=15),
+            reviewed_at=now - timedelta(days=2, hours=2, minutes=3),
+            reviewed_by=admin_user,
+            linked_news_article=articles["swimming_recap"],
         )
 
         AIRecap.objects.create(
