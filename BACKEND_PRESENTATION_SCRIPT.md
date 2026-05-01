@@ -498,4 +498,3 @@ backend/
 | **Security** | OTP verification, Turnstile, CORS, encrypted cookies |
 | **Quality** | Correctness > Scalability > Operations > DX |
 
-**Questions?**
